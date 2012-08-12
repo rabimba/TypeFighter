@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset=utf-8 />
+<title>Type Fighter V1</title>
+
+<meta id="meta" name="viewport" content="width=device-width; user-scalable=no; initial-scale=1.0" /> 
+<style>
+* {
+  -webkit-touch-callout: none;
+  -webkit-text-size-adjust: none;
+  -webkit-tap-highlight-color: rgba(0,0,0,0); 
+  -webkit-user-select: none;
+}
+body { 
+  margin: 0; 
+}
+canvas { 
+  display: block; 
+  position: relative; 
+  z-index: 1; 
+  background: #000;
+  background: -webkit-gradient(radial, 50% -200, 0, 50% -200, 1000, from(#333), to(#000))
+}
+a { 
+  position: absolute; 
+  left: 15px; 
+  top: 80px; 
+  font-family: arial; 
+  font-size: 16px; 
+  color: #fff; 
+  font-weight: bold; 
+  opacity: 0;
+  -webkit-transition: opacity 200ms ease-out;
+  -o-transition: opacity 200ms ease-out;
+  -moz-transition: opacity 200ms ease-out;
+  -ms-transition: opacity 200ms ease-out;
+  transition: opacity 200ms ease-out;
+  z-index: -1;
+}
+.gameover a {
+  opacity: 1;
+  z-index: 2;
+}
+div {
+  opacity: 1;
+  width: 90%;
+  position: absolute;
+  left: 5%;
+  top: 80px;
+  z-index: 4;
+  border-radius: 5px;
+  background: #171717;
+  -webkit-box-shadow: 0 0 5px #fff;
+  -moz-box-shadow: 0 0 5px #fff;
+  -o-box-shadow: 0 0 5px #fff;
+  box-shadow: 0 0 5px #fff;
+  -webkit-border-radius: 10px;
+  -moz-border-radius: 10px;
+  border-radius: 10px;
+}
+div p {
+  margin: 0;
+  margin: 20px;
+  font-size: 18px;
+  font-family: sans-serif;
+  font-weight: bold;
+  color: #eee;  
+  text-shadow: 0 0 5px rgba(255,255,255,0.5);
+  line-height: 26px;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<a id="play" href="?">Play again</a>
+<div id="notice">
+  <p><span id="type">Type</span> the letters as you see them to get more lives. Get it wrong, you lose a life. Survive as long as you can!</p>
+  <p>Starting in <span id="countdown">3</span></p>
+</div>
+<script>
+var $ = function (id) { return document.getElementById(id); },
+    ctx = $('canvas').getContext('2d'),
+    letters = [],
+    countdown = $('countdown'),
+    gametype = $('type'),
+    chrs = 'abcdefghijklmnopqrstuvwxz',
+    winH = window.innerHeight,
+    winW = window.innerWidth,
+    body = document.body,
+    start = +new Date,
+    pauseTime = 0,
+    ended = 0,
+    lastfps = +new Date,
+    canvasTimer = null,
+    letterTimer = null,
+    rnd = function () { return Math.random(); },
+    rndInt = function (n) { return ~~(rnd()*n); },
+    color = function () { return 180+rndInt(75); },
+    font = '',
+    // add to this list to give a wider range of fonts - don't worry, I'll detect which are installed
+    fonts = ((window.location.search ? decodeURIComponent(window.location.search.substr(1))+',' : '') + 'Arial,Adelle Basic,American Typewriter,Wide Latin,Candara,Apple Chancery,Arial Black,Baskerville,Comic Sans MS,Copperplate,Courier New,Futura,Geneva,Georgia,Helvetica,Franklin Gothic Medium,Impact,Optima,Palatino Linotype,Papyrus,Trebuchet MS,Zapfino,Rockwell,Myriad Pro,Gill Sans,Curlz MT,Cooper Black,Century Gothic,Calisto MT,Calibri,Bauhaus 93,Marker Felt,Mistral,Matura MT Script Capitals').split(','),
+    i = fonts.length,
+    newLetterRate,
+    newLetterRateSub,
+    speed,
+    lives,
+    level,
+    inarow,
+    active = false;
+
+// nasty, but Chrome pretends to have touch support - so we're going to sniff.
+if (/mobile/i.test(navigator.userAgent.toLowerCase()) && 'createTouch' in document) {
+  gametype.innerHTML = 'Touch';
+}
+
+// filter available fonts
+while (i--) { !fontInstalled(fonts[i]) && fonts.splice(i, 1); }
+
+function reset() {
+  active = true;
+  lives = 3;
+  level = 1;
+  inarow = 0;
+  speed = 0.5;
+  letters = [];
+  start = +new Date;
+  ended = 0;
+  newLetterRate = 1000;
+  newLetterRateSub = 100;
+  body.className = '';
+  startTimers();
+}
+
+function startTimers() {
+  if (active && pauseTime) start += (new Date - pauseTime);
+  clearInterval(canvasTimer);
+  canvasTimer = setInterval(draw, 20);
+  clearInterval(letterTimer);
+  letterTimer = setInterval(addLetter, newLetterRate);
+}
+
+function stopTimers() {
+  pauseTime = +new Date;
+  clearInterval(canvasTimer);
+  canvasTimer = null;
+  clearInterval(letterTimer);
+  letterTimer = null;
+}
+
+function toggleTimers() {
+  if (canvasTimer === null) {
+    startTimers();
+  } else {
+    stopTimers();
+  }
+}
+
+function plusmin() {
+  return Math.round(rnd()) === 0 ? -1 : 1;
+}
+
+function dir() {
+  return (plusmin() * rnd()) * speed;
+}
+
+function Letter(chr) {
+  this.chr = chr;
+  this.x = winW/2 + plusmin() * rndInt(10);
+  this.y = winH/2 + plusmin() * rndInt(10);
+  
+  this.dx = dir();
+  this.dy = dir();
+  
+  this.rgb = [color(),color(),color()].join(',');
+  this.size = 1;
+  this.opacity = 1;
+  this.font = fonts[(level-1) % fonts.length];
+  
+  this.fadeDown = false;
+  this.active = true;
+}
+
+Letter.prototype = {
+  draw: function () {
+    ctx.save();
+    ctx.font = (this.size+=0.5) + 'px "' + this.font + '"';
+
+    if (this.fadeDown && this.opacity > 0) {
+      this.opacity -= 0.1;
+    } 
+    
+    ctx.fillStyle = 'rgba(' + this.rgb + ',' + (this.opacity).toFixed(2) + ')';
+    
+    ctx.fillText(this.chr, this.x, this.y);
+    
+    if (this.opacity <= 0) {
+      this.active = false;
+    } else if (this.x < -50 || this.x > winW + 50 || this.y < -50 || this.y > winH + 50) {
+      this.active = false;
+      hit(false);
+    }
+    
+    ctx.restore();
+    
+    this.x += this.dx =+ this.dx;
+    this.y += this.dy =+ this.dy;
+  }
+};
+
+window.addEventListener('keydown', function (event) {
+  if (event.which == 32) {
+    toggleTimers();
+  }
+
+  if (canvasTimer == null || active == false) return;
+
+  var chr = String.fromCharCode(event.which).toLowerCase(),
+      found = false,
+      i = 0,
+      len = letters.length,
+      l;
+      
+  for (; i < len; i++) {
+    l = letters[i];
+    if (l.active && l.chr === chr) {
+      found = true;
+      l.fadeDown = true;
+      break;
+    }
+  }
+    
+  if (chrs.indexOf(chr) != -1) hit(found);
+}, false);
+
+ctx.canvas.addEventListener('touchstart', function (event) {
+  if (!active && (new Date - ended) > 2000) {
+    toggleTimers();
+    return;
+  }
+  var x = event.touches ? event.touches[0].pageX : event.pageX,
+      y = event.touches ? event.touches[0].pageY : event.pageY,
+      found = false,
+      l,
+      i = 0,
+      len = letters.length;
+  
+  for (; i < len; i++) {
+    l = letters[i];
+    if (x >= (l.x-22) && x <= (l.x+l.size+11) && y <= (l.y+11) && y >= (l.y-l.size-22)) {
+      l.fadeDown = true;
+      found = true;
+      break;
+    }
+  }
+  
+  hit(found);
+}, false);
+
+window.addEventListener('touchmove', function (event) {
+  event.preventDefault();
+}, false);
+
+$('play').addEventListener('click', function (event) {
+  event.preventDefault();
+  reset();
+}, false);
+
+function gamestate() {
+  var fpsIncl = 0;
+  
+  ctx.save();
+  
+  ctx.font = 'bold 16px arial';
+  ctx.fillStyle = "#fff";
+  ctx.fillText("Lives: " + (!active ? 'none :(' : lives), 15, 25);
+  
+  if (active) ended = new Date;
+  ctx.fillText("Survived: " + ((ended - start)/1000).toFixed(2) + 's', 15, 45);
+  ctx.fillText("Level Font: " + fonts[(level-1) % fonts.length], 15, 65);
+
+  if (fpsIncl) {
+    ctx.fillText("FPS: " + ~~(1000/(new Date - lastfps)), 15, 85);
+    lastfps = +new Date;
+  }
+  
+  ctx.restore();
+}
+
+function hit(ok) {
+  if (active) {
+    if (ok) {
+      lives++;
+      inarow++;
+      speed += 0.025;
+      if (inarow == 10) {
+        newLetterRate -= newLetterRateSub;
+        if (newLetterRate <= 200) newLetterRateSub = 10;
+        if (newLetterRate <= 20) newLetterRate = 20; // crazy fast - keyboard mashing time!
+        
+        clearInterval(letterTimer);
+        letterTimer = setInterval(addLetter, newLetterRate);
+        
+        inarow = 0;
+        level++;
+      }
+    } else {
+      lives--;
+    }    
+
+    if (lives === 0) {
+      active = false;
+      body.className = 'gameover';
+      var go = [];
+      letters.forEach(function (l) {
+        l.opacity = 0.2;
+      });
+      'game over'.split('').reverse().forEach(function (l, i) {
+        var letter = new Letter(l);
+        letter.dy = 0;
+        letter.dx = (4.5-i)*0.25;
+        letter.x = winW/2;
+        letter.y = winH/2;
+        letters.unshift(letter);
+      });
+    }
+  }
+}
+
+function fontInstalled(name) {
+  name = name.replace(/['"<>]/g,'');
+
+  var test  = document.createElement('div'),
+      installed = false,
+      template =
+          '<b style="display:inline !important; width:auto !important; font:normal 10px/1 \'X\',sans-serif !important">ii</b>'+
+          '<b style="display:inline !important; width:auto !important; font:normal 10px/1 \'X\',monospace !important">ii</b>',
+      ab;
+
+  if (name) {
+    test.innerHTML = template.replace(/X/g, name);
+    test.style.cssText = 'position: absolute; visibility: hidden; display: block !important';
+    body.insertBefore(test, body.firstChild);
+    ab = test.getElementsByTagName('b');
+    installed = ab[0].offsetWidth === ab[1].offsetWidth;
+    body.removeChild(test);
+  }
+
+  return installed;
+}
+
+function addLetter() {
+  if (active) {
+    var letter = new Letter(chrs.substr([rndInt(chrs.length)], 1));
+    letters.push(letter);    
+  }
+}
+
+function draw() {
+  var newletters = [],
+      i = letters.length;
+
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  while (i--) {
+    if (letters[i].active) {
+      letters[i].draw();
+    } else {
+      letters.splice(i, 1);
+    }
+  }
+  gamestate();
+}
+
+ctx.canvas.width = winW;
+ctx.canvas.height = winH;
+
+ctx.textAlign = 'left';
+
+setTimeout(function removeNotice() {
+  if (countdown.innerHTML == '0') {
+    body.removeChild($('notice'));
+    reset();
+  } else {
+    countdown.innerHTML--;
+    setTimeout(removeNotice, 1000);
+  }
+}, 1000);
+</script>
+</body>
+</html>
