@@ -2,6 +2,7 @@
 ### A simple HTML5 game using Canvas.
 
 It will ideally let you test your typing speed or whatever you think of it as a game.
+You can see a working version of this code at www.rabimba.com/type
 
 ## Requirements
 
